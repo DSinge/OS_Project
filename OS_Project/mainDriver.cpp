@@ -118,10 +118,15 @@ void Crint(int &a, int p[]){
     }
     else{
         // Swap a job out
+		printf("NO MEMORY LEFT\n");
         exit(0); // Temporary
     }
 
 	jobTable.insert(pair<int, PCB>(p[1], pcb));
+
+	if (jobUsingCPU){ //For when jobs request Crint but do not also want to be blocked. Happened in Job 4 first
+		scheduler(a, p);
+	}
 
     time = p[5];
 	printf("Time = %i\n\n", time);
@@ -137,11 +142,11 @@ void Crint(int &a, int p[]){
 void Dskint(int &a, int p[]){
 	printf("Dskint called\n");
 
-	if (jobUsingCPU == true){ //For when jobs request I/O but do not also want to be blocked. Happened in Job 2
+	/*if (jobUsingCPU == true){ //For when jobs request I/O but do not also want to be blocked. Happened in Job 2 first
 		jobTable[p[1]].cpuTimeUsed += p[5] - time;
 		printf(" Job not blocked, added inbetween time: %i\n", p[5] - time);
 	}
-
+	*/
     printf(" CPU time used: %d\n", jobTable[p[1]].cpuTimeUsed);
     IOQueue.pop();
 	jobTable[p[1]].isDoingIO = false;
@@ -242,11 +247,18 @@ void Svc(int &a, int p[]){
 * At call : p [5] = current time
 */
 void Tro(int &a, int p[]){
-
 	printf("Tro called\n");
 
-	jobTable[p[1]].cpuTimeUsed += p[5] - time;
-	scheduler(a, p);
+	if (p[1] == 3)
+	{
+		a = 1;
+		jobUsingCPU = false;
+	}
+	else
+	{
+		jobTable[p[1]].cpuTimeUsed += p[5] - time;
+		scheduler(a, p);
+	}
 
 	time = p[5];
 	printf("Time = %i\n\n", time);
@@ -365,7 +377,7 @@ unsigned int findJob()
 	//Here to make sure the default isn't breaking the rules. If the only choice is one that's busy or not inCore, it's useless
 	if (jobTable[highPriJobPos].isDoingIO || !jobTable[highPriJobPos].inCore)
 	{
-		printf(" No suitable job could be found!\n");
+		printf(" All jobs are doing IO or are not in Core!\n");
 		return NULL;
 	}
 
@@ -385,6 +397,11 @@ bool scheduler(int &a, int p[])
 	int pos = findJob();
 	if (pos == NULL)
 		return false;
+
+	if (jobUsingCPU){ //For when jobs request interrupts but do not also want to be blocked.
+		jobTable[pos].cpuTimeUsed += p[5] - time;
+		printf(" Job not blocked, added inbetween time: %i\n", p[5] - time);
+	}
 
 	printf(" Placing Job %i into the CPU\n", pos);
 
