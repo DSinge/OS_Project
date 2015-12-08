@@ -45,7 +45,7 @@ static queue<PCB*> IOQueue;
 //Stores the current time, taken from interrupts
 static int time;
 
-bool jobInCPU;
+bool jobUsingCPU;
 
 void allocMem(int startAddress, int jobSize);
 int findMemLoc(int jobSize);
@@ -53,7 +53,11 @@ int findMemLoc(int jobSize);
 //Finds the highest priority job stored in jobTable and returns the job (key) number
 unsigned int findJob();
 
+//Schedules Jobs, see description
 bool scheduler(int &a, int p[]);
+
+//I/O Setup
+void sendIO(int &a, int p[]);
 
 
 /* Function: startup
@@ -68,7 +72,7 @@ void startup(){
     // First node - All of memory is free
     freeSpaceTable.push_back(pair<int, int>(0, 99));
     time = 0;
-	jobInCPU = false;
+	jobUsingCPU = false;
 }
 
 
@@ -133,7 +137,12 @@ void Crint(int &a, int p[]){
 void Dskint(int &a, int p[]){
 	printf("Dskint called\n");
 
-    printf(" CPU time used: %d\n", jobTable[1].cpuTimeUsed);
+	if (jobUsingCPU == true){ //For when jobs request I/O but do not also want to be blocked. Happened in Job 2
+		jobTable[p[1]].cpuTimeUsed += p[5] - time;
+		printf(" Job not blocked, added inbetween time: %i\n", p[5] - time);
+	}
+
+    printf(" CPU time used: %d\n", jobTable[p[1]].cpuTimeUsed);
     IOQueue.pop();
 	jobTable[p[1]].isDoingIO = false;
     
@@ -141,8 +150,7 @@ void Dskint(int &a, int p[]){
         printf("IOQueue not empty");
     }
 
-	if (jobInCPU == false)
-		scheduler(a, p);
+	scheduler(a, p);
 
     time = p[5];
 	printf("Time = %i\n\n", time);
@@ -161,7 +169,7 @@ void Drmint(int &a, int p[]){
 	jobTable[p[1]].inCore = true;
 
 	//Only scheduling here if there's absolutely nothing in the CPU
-	if (jobInCPU == false)
+	if (jobUsingCPU == false)
 		scheduler(a, p);
 
   //  printf("p[4]: %d\n", p[4]);
@@ -196,27 +204,16 @@ void Svc(int &a, int p[]){
 			if (scheduler(a, p) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
 			{	
 				printf(" No jobs could be run, CPU will stall.\n");
-				jobInCPU = false;
+				jobUsingCPU = false;
 				a = 1;
 			}
 			time = p[5];
         } break;
         
         case 6:    // Job requests disk I/O
-        {//Only handling first item
+        {
 			printf(" Job %i requested I/O\n", p[1]);
-
-            IOQueue.push(&jobTable[p[1]]);
-            jobTable[p[1]].onIOQueue = true;
-            //cout << IOQueue.front()->jobNumber << endl;
-
-            siodisk(IOQueue.front()->jobNumber);
-            jobTable[IOQueue.front()->jobNumber].isDoingIO = true;
-
-            a = 2;
-            p[2] = 0;
-            p[3] = 18;
-            p[4] = jobTable[1].maxCpuTime - jobTable[1].cpuTimeUsed;
+			sendIO(a, p);
             time = p[5];
         } break;
         
@@ -225,7 +222,7 @@ void Svc(int &a, int p[]){
 			printf(" Job %i wants to be blocked\n", p[1]);
 			if (scheduler(a, p) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
 			{
-				jobInCPU = false;
+				jobUsingCPU = false;
 				a = 1;
 			}
 			time = p[5];
@@ -247,6 +244,9 @@ void Svc(int &a, int p[]){
 void Tro(int &a, int p[]){
 
 	printf("Tro called\n");
+
+	jobTable[p[1]].cpuTimeUsed += p[5] - time;
+	scheduler(a, p);
 
 	time = p[5];
 	printf("Time = %i\n\n", time);
@@ -310,6 +310,32 @@ int findMemLoc(int jobSize){
 }
 
 
+/* Function: sendIO
+* ---------------
+* Sends the job into IO when it requests it
+* Just sets p[] to whatever job description was given, does not take into consideration stored I/O jobs
+*/
+void sendIO(int &a, int p[])
+{
+	printf(" sendIO called\n");
+	IOQueue.push(&jobTable[p[1]]);
+	jobTable[p[1]].onIOQueue = true;
+
+	siodisk(IOQueue.front()->jobNumber);
+	
+	//If the I/O is being requested, then the job must be in the CPU right now.
+	p[1] = jobTable[p[1]].jobNumber;
+	p[2] = jobTable[p[1]].memoryPos;
+	p[3] = jobTable[p[1]].jobSize;
+	p[4] = jobTable[p[1]].maxCpuTime - jobTable[p[1]].cpuTimeUsed;
+	printf(" p[4] (Time Quantum)= %i\n", p[4]);
+
+	jobTable[IOQueue.front()->jobNumber].isDoingIO = true;
+
+	a = 2;
+}
+
+
 
 /* Function: findJob
 * ---------------
@@ -337,7 +363,7 @@ unsigned int findJob()
 	}
 
 	//Here to make sure the default isn't breaking the rules. If the only choice is one that's busy or not inCore, it's useless
-	if (jobTable[highPriJobPos].isDoingIO == true || jobTable[highPriJobPos].inCore == false)
+	if (jobTable[highPriJobPos].isDoingIO || !jobTable[highPriJobPos].inCore)
 	{
 		printf(" No suitable job could be found!\n");
 		return NULL;
@@ -366,10 +392,10 @@ bool scheduler(int &a, int p[])
 	p[2] = jobTable[pos].memoryPos;
 	p[3] = jobTable[pos].jobSize;
 	p[4] = jobTable[pos].maxCpuTime - jobTable[pos].cpuTimeUsed;
-	printf(" p[4]= %i\n", p[4]);
+	printf(" p[4] (Time Quantum)= %i\n", p[4]);
 
 	a = 2;
-	jobInCPU = true;
+	jobUsingCPU = true;
 
 	return true;
 }
