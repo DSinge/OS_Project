@@ -78,18 +78,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="IO_Manager.cpp" />
     <ClCompile Include="mainDriver.cpp" />
-    <ClCompile Include="memoryManager.cpp" />
-    <ClCompile Include="scheduler.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Object Include="sosvc9.obj" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="IO_Manager.h" />
-    <ClInclude Include="memoryManager.h" />
-    <ClInclude Include="scheduler.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
