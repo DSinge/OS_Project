@@ -88,7 +88,7 @@ void startup(){
  * p [5] = current time
  */
 void Crint(int &a, int p[]){
-	std::cout << "Crint called\n";
+	printf("Crint called\n");
 
     // Create a PCB and store it in the job table
     // Maybe this should be a constructor?
@@ -120,7 +120,7 @@ void Crint(int &a, int p[]){
 	jobTable.insert(pair<int, PCB>(p[1], pcb));
 
     time = p[5];
-	cout << "Time = " << time << "\n\n";
+	printf("Time = %i\n\n", time);
 }
 
 
@@ -131,7 +131,7 @@ void Crint(int &a, int p[]){
  * At call: p[5] = current time
  */
 void Dskint(int &a, int p[]){
-	std::cout << "Dskint called\n";
+	printf("Dskint called\n");
 
     printf(" CPU time used: %d\n", jobTable[1].cpuTimeUsed);
     IOQueue.pop();
@@ -145,7 +145,7 @@ void Dskint(int &a, int p[]){
 		scheduler(a, p);
 
     time = p[5];
-	cout << "Time = " << time << "\n\n";
+	printf("Time = %i\n\n", time);
 
 }
 
@@ -167,7 +167,7 @@ void Drmint(int &a, int p[]){
   //  printf("p[4]: %d\n", p[4]);
 
     time = p[5];    
-	cout << "Time = " << time << "\n\n";
+	printf("Time = %i\n\n", time);
 }
 
 
@@ -182,7 +182,7 @@ void Drmint(int &a, int p[]){
  * I/O requests are completed
  */
 void Svc(int &a, int p[]){
-	std::cout << "Svc called\n";
+	printf("Svc called\n");
 
 	jobTable[p[1]].cpuTimeUsed += p[5] - time;
 	printf(" Job %i CPU time used: %d\n", p[1], jobTable[p[1]].cpuTimeUsed);
@@ -191,13 +191,14 @@ void Svc(int &a, int p[]){
     switch(a){
         case 5:    // Job has terminated
         {
+			printf(" Job %i has terminated\n", p[1]);
 			jobTable.erase(p[1]);
 			if (scheduler(a, p) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
-			{
+			{	
+				printf(" No jobs could be run, CPU will stall.\n");
 				jobInCPU = false;
 				a = 1;
 			}
-			printf(" Job %i has terminated\n", p[1]);
 			time = p[5];
         } break;
         
@@ -235,7 +236,7 @@ void Svc(int &a, int p[]){
             printf("a has invalid value %d\n", a);
         }
     }
-	cout << "Time = " << time << "\n\n";
+	printf("Time = %i\n\n", time);
 }
 
 /* Function: Tro
@@ -245,10 +246,10 @@ void Svc(int &a, int p[]){
 */
 void Tro(int &a, int p[]){
 
-	std::cout << "Tro called\n";
+	printf("Tro called\n");
 
 	time = p[5];
-	cout << "Time = " << time << "\n\n";
+	printf("Time = %i\n\n", time);
 }
 
 
@@ -316,26 +317,32 @@ int findMemLoc(int jobSize){
 * While the first element of the map is not in core, it will keep changing the starting values until it finds one that is
 * Afterwards, it checks the remaining members of jobTable for any that might have higher priority
 * Returns the position of a high priority item
+* If there are no jobs that can be run, it should follow the map until the end of the list and return NULL
 */
 unsigned int findJob()
 {
-	unsigned int highPriJobPos = 1, highPriJobPriority = jobTable[1].priority;
+	std::map<int, PCB>::iterator jobIt = jobTable.begin();
+	if (jobTable.size() == 0) //Returns null if the job table is empty
+		return NULL;
 
-	for (unsigned int i = 1; i < jobTable.size(); i++)
+	unsigned int highPriJobPriority = jobIt->second.priority, highPriJobPos = jobIt->first; //Set the default choice values to first item
+
+	for (jobIt = jobTable.begin(); jobIt != jobTable.end(); ++jobIt)
 	{
-		if (jobTable[i].priority < highPriJobPriority && jobTable[i].inCore == true && jobTable[i].isDoingIO == false) //Is the priority on the node it's looking at and is it in the core?
+		if (jobIt->second.priority < highPriJobPriority && jobIt->second.inCore == true && jobIt->second.isDoingIO == false) //Is the priority on the node it's looking at and is it in the core?
 		{
-			highPriJobPos = jobTable[i].jobNumber;
-			highPriJobPriority = jobTable[i].priority;
+			highPriJobPos = jobIt->first;
+			highPriJobPriority = jobIt->second.priority;
 		}
 	}
 
-	//Here to make sure the default isn't breaking the rules
-	if (jobTable[highPriJobPos].isDoingIO == true)
-	{	
+	//Here to make sure the default isn't breaking the rules. If the only choice is one that's busy or not inCore, it's useless
+	if (jobTable[highPriJobPos].isDoingIO == true || jobTable[highPriJobPos].inCore == false)
+	{
 		printf(" No suitable job could be found!\n");
 		return NULL;
 	}
+
 	return highPriJobPos;
 }
 
@@ -359,7 +366,7 @@ bool scheduler(int &a, int p[])
 	p[2] = jobTable[pos].memoryPos;
 	p[3] = jobTable[pos].jobSize;
 	p[4] = jobTable[pos].maxCpuTime - jobTable[pos].cpuTimeUsed;
-	cout << " p[4]= " << p[4] << "\n";
+	printf(" p[4]= %i\n", p[4]);
 
 	a = 2;
 	jobInCPU = true;
