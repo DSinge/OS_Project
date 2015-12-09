@@ -11,7 +11,6 @@ void siodrum(int jobnum, int jobsize, int coreaddress, int direction);
 void ontrace(); // called without arguments
 void offtrace(); // called without arguments
 
-// Daniel
 // Holds any relevant info about a job
 struct PCB {
     int jobNumber;
@@ -32,11 +31,19 @@ struct PCB {
 // Index is a job number and value is a PCB
 static map<int, PCB> jobTable;
 
-// Daniel
+struct FreeSpace {
+    int address;
+    int size;
+
+    FreeSpace(int address, int size){
+        this->address = address;
+        this->size = size;
+    }
+};
 // Stores all the free spaces in memory
 // in the form <Starting address, Size of free space>
 // New nodes are created as needed
-static list<pair<int, int> > freeSpaceTable;
+static list<FreeSpace> freeSpaceTable;
 
 // Stores pointers to PCBs in jobTable
 // Using pointers to easily test if the job is in memory
@@ -47,8 +54,9 @@ static int time;
 
 bool jobUsingCPU;
 
-void allocMem(int startAddress, int jobSize);
 int findMemLoc(int jobSize);
+void allocMem(int startAddress, int jobSize);
+void deallocMem(int startAddress, int jobSize);
 
 //Finds the highest priority job stored in jobTable and returns the job (key) number
 unsigned int findJob();
@@ -70,7 +78,7 @@ void startup(){
     
     //ontrace();
     // First node - All of memory is free
-    freeSpaceTable.push_back(pair<int, int>(0, 99));
+    freeSpaceTable.push_back(FreeSpace(0, 100));
     time = 0;
 	jobUsingCPU = false;
 }
@@ -205,6 +213,16 @@ void Svc(int &a, int p[]){
         case 5:    // Job has terminated
         {
 			printf(" Job %i has terminated\n", p[1]);
+
+            deallocMem(jobTable[p[1]].memoryPos, jobTable[p[1]].jobSize);
+
+
+
+
+
+
+
+
 			jobTable.erase(p[1]);
 			if (scheduler(a, p) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
 			{	
@@ -251,6 +269,7 @@ void Tro(int &a, int p[]){
 
 	if (p[1] == 3)
 	{
+        deallocMem(jobTable[p[1]].memoryPos, jobTable[p[1]].jobSize);
 		a = 1;
 		jobUsingCPU = false;
 	}
@@ -269,33 +288,6 @@ void Tro(int &a, int p[]){
 //===================
 //Start of Functions
 
-
-
-/* Function: allocMem
-* ------------------
-* Updates the Free Space Table when a job is placed in memory
-*/
-void allocMem(int startAddress, int jobSize){
-
-	list<pair<int, int> >::iterator freeSpaceIter;
-
-	for (freeSpaceIter = freeSpaceTable.begin();
-		freeSpaceIter != freeSpaceTable.end();
-		freeSpaceIter++)
-	{
-		if (freeSpaceIter->first == startAddress){
-			freeSpaceIter->first += jobSize;
-			freeSpaceIter->second -= jobSize;
-			if (freeSpaceIter->second == 0){
-				freeSpaceTable.erase(freeSpaceIter);
-				return;
-			}
-		}
-	}
-}
-
-
-
 /* Function: findMemLoc
  * --------------------
  * First-Fit Algorithm
@@ -307,20 +299,90 @@ void allocMem(int startAddress, int jobSize){
  */
 int findMemLoc(int jobSize){
 
-    list<pair<int, int> >::iterator freeSpaceIter;
+    list<FreeSpace>::iterator freeSpaceIter;
 
     for(freeSpaceIter = freeSpaceTable.begin();
         freeSpaceIter != freeSpaceTable.end();
         freeSpaceIter++)
     {
-        if(freeSpaceIter->second >= jobSize){
-            return freeSpaceIter->first;
+        if(freeSpaceIter->size >= jobSize){
+            return freeSpaceIter->address;
         }
     }
     return -1;
     
 }
 
+/* Function: allocMem
+ * ------------------
+ * Updates the Free Space Table when a job is placed in memory
+ */
+void allocMem(int startAddress, int jobSize){
+
+    list<FreeSpace>::iterator freeSpaceIter;
+
+    for(freeSpaceIter = freeSpaceTable.begin();
+        freeSpaceIter != freeSpaceTable.end();
+        freeSpaceIter++)
+    {
+        if(freeSpaceIter->address == startAddress){
+            freeSpaceIter->address += jobSize;
+            freeSpaceIter->size -= jobSize;
+            if(freeSpaceIter->size == 0){
+                freeSpaceTable.erase(freeSpaceIter);
+                return;
+            }
+        }
+    }
+}
+
+/* deallocMem
+ * ----------
+ * Deallocates the memory space used by a job that was either
+ * terminated or swapped out of memory.
+ * Merges adjacent free spaces into one block.
+ */
+void deallocMem(int startAddress, int jobSize){
+    
+    list<FreeSpace>::iterator freeSpaceIter;
+    int i = 0;
+    // Finds the correct position in the freeSpaceTable,
+    // for the new entry, based on address value
+    for(freeSpaceIter = freeSpaceTable.begin();
+        freeSpaceIter != freeSpaceTable.end();
+        freeSpaceIter++)
+    {
+        if(freeSpaceIter->address > startAddress){
+            freeSpaceIter = freeSpaceTable.insert(freeSpaceIter, FreeSpace(startAddress, jobSize));
+            break;
+        }
+    }
+
+    // If startAddress is the highest value (last in the list)
+    if(freeSpaceIter == freeSpaceTable.end()){
+        freeSpaceIter = freeSpaceTable.insert(freeSpaceIter, FreeSpace(startAddress, jobSize));
+    }
+
+    // If freeSpaceIter is not pointing to last element
+    // then attempt to merge it with the next free space
+    // NOTE: freeSpaceTable.end() points to one past the last element
+    if(next(freeSpaceIter) != freeSpaceTable.end()){
+        if(next(freeSpaceIter)->address == (startAddress + jobSize)){
+            freeSpaceIter->size += next(freeSpaceIter)->size;
+            freeSpaceTable.erase(next(freeSpaceIter));
+        }
+    }
+
+    // If freeSpaceIter is not pointing to the first element then
+    // attempt to merge it with the previous free space
+    if(freeSpaceIter != freeSpaceTable.begin()){
+        if(prev(freeSpaceIter)->address == (startAddress - prev(freeSpaceIter)->size)){
+            prev(freeSpaceIter)->size += freeSpaceIter->size;
+            freeSpaceTable.erase(freeSpaceIter);
+        }
+    }
+    
+}
 
 /* Function: sendIO
 * ---------------
