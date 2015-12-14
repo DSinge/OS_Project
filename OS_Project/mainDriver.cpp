@@ -53,6 +53,7 @@ static queue<PCB*> IOQueue;
 static int time;
 
 bool jobUsingCPU;
+int usingDrum;
 
 int findMemLoc(int jobSize);
 void allocMem(int startAddress, int jobSize);
@@ -81,6 +82,7 @@ void startup(){
     freeSpaceTable.push_back(FreeSpace(0, 100));
     time = 0;
     jobUsingCPU = false;
+    usingDrum = 0;
 }
 
 
@@ -122,12 +124,19 @@ void Crint(int &a, int p[]){
     if(memLoc >= 0){
         allocMem(memLoc, p[3]);
         pcb.memoryPos = memLoc;
-        siodrum(p[1], p[3], memLoc, 0);
+        if(usingDrum == 0){
+            usingDrum = p[1];
+            siodrum(p[1], p[3], memLoc, 0);
+        }/*
+        else{
+            printf("DRUM IS BUSY");
+            exit(1);
+            }*/
     }
     else{
         // Swap a job out
         printf("NO MEMORY LEFT\n");
-        exit(0); // Temporary
+        //exit(1); // Temporary
     }
 
     jobTable.insert(pair<int, PCB>(p[1], pcb));
@@ -179,11 +188,14 @@ void Dskint(int &a, int p[]){
  */
 void Drmint(int &a, int p[]){
     cout << "Drmint Called\n";
-    jobTable[p[1]].inCore = true;
+    jobTable[usingDrum].inCore = true;
+    usingDrum = 0;
 
     //Only scheduling here if there's absolutely nothing in the CPU
-    if (jobUsingCPU == false)
+//    if (jobUsingCPU == false)
         scheduler(a, p);
+        //    else
+        //a = 2;
 
   //  printf("p[4]: %d\n", p[4]);
 
@@ -207,8 +219,7 @@ void Svc(int &a, int p[]){
 
     jobTable[p[1]].cpuTimeUsed += p[5] - time;
     printf(" Job %i CPU time used: %d\n", p[1], jobTable[p[1]].cpuTimeUsed);
-    
-    
+        
     switch(a){
         case 5:    // Job has terminated
         {
