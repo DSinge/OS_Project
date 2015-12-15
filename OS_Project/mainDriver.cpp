@@ -54,16 +54,17 @@ static int time;
 
 bool jobUsingCPU;
 int usingDrum;
+int jobInCPU;
 
 int findMemLoc(int jobSize);
 void allocMem(int startAddress, int jobSize);
 void deallocMem(int startAddress, int jobSize);
 
-//Finds the highest priority job stored in jobTable and returns the job (key) number
-unsigned int findJob();
+//Finds the highest priority job stored in jobTable and returns the job (key) number. It will completely ignore job of specified number
+unsigned int findJob(int ignoreJob);
 
 //Schedules Jobs, see description
-bool scheduler(int &a, int p[]);
+bool scheduler(int &a, int p[], bool svcBlock);
 
 //I/O Setup
 void sendIO(int &a, int p[]);
@@ -83,6 +84,7 @@ void startup(){
     time = 0;
     jobUsingCPU = false;
     usingDrum = 0;
+	jobInCPU = -1;
 }
 
 
@@ -142,7 +144,7 @@ void Crint(int &a, int p[]){
     jobTable.insert(pair<int, PCB>(p[1], pcb));
 
     if (jobUsingCPU){ //For when jobs request Crint but do not also want to be blocked. Happened in Job 4 first
-        scheduler(a, p);
+        scheduler(a, p, false);
     }
 
     time = p[5];
@@ -159,20 +161,15 @@ void Crint(int &a, int p[]){
 void Dskint(int &a, int p[]){
     printf("Dskint called\n");
 
-    /*if (jobUsingCPU == true){ //For when jobs request I/O but do not also want to be blocked. Happened in Job 2 first
-        jobTable[p[1]].cpuTimeUsed += p[5] - time;
-        printf(" Job not blocked, added inbetween time: %i\n", p[5] - time);
-    }
-    */
-    printf(" CPU time used: %d\n", jobTable[p[1]].cpuTimeUsed);
+	printf(" CPU time used: %d\n", jobTable[jobInCPU].cpuTimeUsed);
     IOQueue.pop();
-    jobTable[p[1]].isDoingIO = false;
+	jobTable[jobInCPU].isDoingIO = false;
     
     if(!IOQueue.empty()){
         printf("IOQueue not empty");
     }
 
-    scheduler(a, p);
+    scheduler(a, p, false);
 
     time = p[5];
     printf("Time = %i\n\n", time);
@@ -191,13 +188,7 @@ void Drmint(int &a, int p[]){
     jobTable[usingDrum].inCore = true;
     usingDrum = 0;
 
-    //Only scheduling here if there's absolutely nothing in the CPU
-//    if (jobUsingCPU == false)
-        scheduler(a, p);
-        //    else
-        //a = 2;
-
-  //  printf("p[4]: %d\n", p[4]);
+    scheduler(a, p, false);
 
     time = p[5];    
     printf("Time = %i\n\n", time);
@@ -217,18 +208,18 @@ void Drmint(int &a, int p[]){
 void Svc(int &a, int p[]){
     printf("Svc called\n");
 
-    jobTable[p[1]].cpuTimeUsed += p[5] - time;
-    printf(" Job %i CPU time used: %d\n", p[1], jobTable[p[1]].cpuTimeUsed);
+	jobTable[jobInCPU].cpuTimeUsed += p[5] - time;
+	printf(" Job %i CPU time used: %d\n", jobInCPU, jobTable[jobInCPU].cpuTimeUsed);
         
     switch(a){
         case 5:    // Job has terminated
         {
-            printf(" Job %i has terminated\n", p[1]);
+			printf(" Job %i has terminated\n", jobInCPU);
 
-            deallocMem(jobTable[p[1]].memoryPos, jobTable[p[1]].jobSize);
+			deallocMem(jobTable[jobInCPU].memoryPos, jobTable[jobInCPU].jobSize);
 
-            jobTable.erase(p[1]);
-            if (scheduler(a, p) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
+			jobTable.erase(jobInCPU);
+            if (scheduler(a, p, false) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
             {   
                 printf(" No jobs could be run, CPU will stall.\n");
                 jobUsingCPU = false;
@@ -239,15 +230,15 @@ void Svc(int &a, int p[]){
         
         case 6:    // Job requests disk I/O
         {
-            printf(" Job %i requested I/O\n", p[1]);
+			printf(" Job %i requested I/O\n", jobInCPU);
             sendIO(a, p);
             time = p[5];
         } break;
         
         case 7:    // Job wants to be blocked
         {
-            printf(" Job %i wants to be blocked\n", p[1]);
-            if (scheduler(a, p) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
+			printf(" Job %i wants to be blocked\n", jobInCPU);
+            if (scheduler(a, p, true) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
             {
                 jobUsingCPU = false;
                 a = 1;
@@ -271,18 +262,19 @@ void Svc(int &a, int p[]){
 void Tro(int &a, int p[]){
     printf("Tro called\n");
     
-    jobTable[p[1]].cpuTimeUsed += p[5] - time;
+	jobTable[jobInCPU].cpuTimeUsed += p[5] - time;
 
-    if (jobTable[p[1]].cpuTimeUsed == jobTable[p[1]].maxCpuTime)
+	if (jobTable[jobInCPU].cpuTimeUsed == jobTable[jobInCPU].maxCpuTime)
     {
-        deallocMem(jobTable[p[1]].memoryPos, jobTable[p[1]].jobSize);
-        jobTable.erase(p[1]);        
+		deallocMem(jobTable[jobInCPU].memoryPos, jobTable[jobInCPU].jobSize);
+		jobTable.erase(jobInCPU);
         a = 1;
         jobUsingCPU = false;
+		scheduler(a, p, false);
     }
     else
     {        
-        scheduler(a, p);
+        scheduler(a, p, false);
     }
 
     time = p[5];
@@ -398,16 +390,16 @@ void deallocMem(int startAddress, int jobSize){
 void sendIO(int &a, int p[])
 {
     printf(" sendIO called\n");
-    IOQueue.push(&jobTable[p[1]]);
-    jobTable[p[1]].onIOQueue = true;
+	IOQueue.push(&jobTable[jobInCPU]);
+	jobTable[jobInCPU].onIOQueue = true;
 
     siodisk(IOQueue.front()->jobNumber);
     
     //If the I/O is being requested, then the job must be in the CPU right now.
-    p[1] = jobTable[p[1]].jobNumber;
-    p[2] = jobTable[p[1]].memoryPos;
-    p[3] = jobTable[p[1]].jobSize;
-    p[4] = jobTable[p[1]].maxCpuTime - jobTable[p[1]].cpuTimeUsed;
+	p[1] = jobTable[jobInCPU].jobNumber;
+	p[2] = jobTable[jobInCPU].memoryPos;
+	p[3] = jobTable[jobInCPU].jobSize;
+	p[4] = jobTable[jobInCPU].maxCpuTime - jobTable[jobInCPU].cpuTimeUsed;
     printf(" p[4] (Time Quantum)= %i\n", p[4]);
 
     jobTable[IOQueue.front()->jobNumber].isDoingIO = true;
@@ -425,7 +417,7 @@ void sendIO(int &a, int p[])
 * Returns the position of a high priority item
 * If there are no jobs that can be run, it should follow the map until the end of the list and return NULL
 */
-unsigned int findJob()
+unsigned int findJob(int ignoreJob)
 {
     std::map<int, PCB>::iterator jobIt = jobTable.begin();
     if (jobTable.size() == 0) //Returns null if the job table is empty
@@ -433,9 +425,16 @@ unsigned int findJob()
 
     unsigned int highPriJobPriority = jobIt->second.priority, highPriJobPos = jobIt->first; //Set the default choice values to first item
 
+	if (jobIt->first == ignoreJob)
+	{
+		next(jobIt);
+		highPriJobPriority = jobIt->second.priority;
+		highPriJobPos = jobIt->first;
+	}
+
     for (jobIt = jobTable.begin(); jobIt != jobTable.end(); ++jobIt)
     {
-        if (jobIt->second.priority < highPriJobPriority && jobIt->second.inCore == true && jobIt->second.isDoingIO == false) //Is the priority on the node it's looking at and is it in the core?
+        if (jobIt->second.priority < highPriJobPriority && jobIt->second.inCore == true && jobIt->second.isDoingIO == false && jobIt->first != ignoreJob) //Is the priority on the node it's looking at and is it in the core?
         {
             highPriJobPos = jobIt->first;
             highPriJobPriority = jobIt->second.priority;
@@ -460,13 +459,18 @@ unsigned int findJob()
 * Highest Priority chosen using 
 *  
 */
-bool scheduler(int &a, int p[])
+bool scheduler(int &a, int p[], bool svcBlock)
 {    
-    int pos = findJob();
+	int pos;
+	if (svcBlock)
+		pos = findJob(jobInCPU);
+	else
+		pos = findJob(-1);
+
     if (pos == NULL)
         return false;
 
-    if (jobUsingCPU){ //For when jobs request interrupts but do not also want to be blocked.
+	if (jobUsingCPU && !svcBlock){ //For when jobs request interrupts but do not also want to be blocked.
         jobTable[pos].cpuTimeUsed += p[5] - time;
         printf(" Job not blocked, added inbetween time: %i\n", p[5] - time);
     }
@@ -481,6 +485,7 @@ bool scheduler(int &a, int p[])
 
     a = 2;
     jobUsingCPU = true;
+	jobInCPU = pos;
 
     return true;
 }
