@@ -221,7 +221,7 @@ void Svc(int &a, int p[]){
             deallocMem(jobTable[jobInCPU].memoryPos, jobTable[jobInCPU].jobSize);
 
             jobTable.erase(jobInCPU);
-            if (scheduler(a, p, false) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
+            if (scheduler(a, p, true) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
             {   
                 printf(" No jobs could be run, CPU will stall.\n");
                 jobUsingCPU = false;
@@ -272,7 +272,7 @@ void Tro(int &a, int p[]){
         jobTable.erase(jobInCPU);
         a = 1;
         jobUsingCPU = false;
-        scheduler(a, p, false);
+        scheduler(a, p, true);
     }
     else
     {        
