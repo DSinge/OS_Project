@@ -82,7 +82,7 @@ void sendIO(int &a, int p[]);
 
 void startup(){
     
-    ontrace();
+    //ontrace();
     // First node - All of memory is free
     freeSpaceTable.push_back(FreeSpace(0, 100));
     time = 0;
@@ -171,8 +171,11 @@ void Dskint(int &a, int p[]){
     printf("Dskint called, job %i has finished I/O operations.\n", jobInIO);
 
     IOQueue.pop();
-    jobTable[jobInIO].isDoingIO = false;
-    jobTable[jobInIO].onIOQueue = false;
+	if (jobInIO != -1)
+	{
+		jobTable[jobInIO].isDoingIO = false;
+		jobTable[jobInIO].onIOQueue = false;
+	}
 
     jobInIO = -1;
 
@@ -260,6 +263,11 @@ void Svc(int &a, int p[]){
             deallocMem(jobTable[jobInCPU].memoryPos, jobTable[jobInCPU].jobSize);
 
             jobTable.erase(jobInCPU);
+			printf("Erasing Job: %i\n", jobInCPU);
+
+			if (jobInCPU == jobInIO) //Too prevent a phantom job from being placed in during Dskint
+				jobInIO = -1;
+
             if (scheduler(a, p, true) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
             {   
                 printf(" No jobs could be run, CPU will stall.\n");
@@ -281,6 +289,7 @@ void Svc(int &a, int p[]){
             printf(" Job %i wants to be blocked\n", jobInCPU);
             if (scheduler(a, p, true) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
             {
+				printf(" No jobs could be run, CPU will stall.\n");
                 jobUsingCPU = false;
                 a = 1;
             }
@@ -315,7 +324,7 @@ void Tro(int &a, int p[]){
     }
     else
     {        
-        scheduler(a, p, false);
+        scheduler(a, p, true);
     }
 
     time = p[5];
@@ -433,12 +442,12 @@ void sendIO(int &a, int p[])
     printf(" sendIO called\n");
     IOQueue.push(&jobTable[jobInCPU]);
     jobTable[jobInCPU].onIOQueue = true;
-    jobTable[jobInCPU].isDoingIO = true;
 
     if (jobInIO == -1) //IO free? Now it's not and the one using it is current job
     {
         siodisk(IOQueue.front()->jobNumber);
         jobInIO = jobInCPU;
+		jobTable[jobInCPU].isDoingIO = true;
     }
     //If the I/O is being requested, then the job must be in the CPU right now.
     p[1] = jobTable[jobInCPU].jobNumber;
@@ -469,27 +478,39 @@ unsigned int findJob(int ignoreJob)
         return NULL;
 
     unsigned int highPriJobPriority = jobIt->second.priority, highPriJobPos = jobIt->first; //Set the default choice values to first item
+	
 
-    if (jobIt->first == ignoreJob)
-    {
-        if (jobIt == jobTable.end())//If the only availible item is also the one that cannot be used, break out of the search.
-        {
-            printf(" Only a job that can't be used is availible, breaking job find!\n");
-            return NULL;
-        }
-        next(jobIt);
-        highPriJobPriority = jobIt->second.priority;
-        highPriJobPos = jobIt->first;
-        cout << "Skipping job " << jobIt->first << endl;
-    }
+	for (jobIt; jobIt != jobTable.end(); ++jobIt)
+	{
+		printf("JOBS: %i\n", jobIt->first);
+		//printf("Chosen job is %i and isDoingIO == %d \n", jobIt->first, jobIt->second.isDoingIO);
+	}
+	 jobIt = jobTable.begin();
 
-    for (jobIt = jobTable.begin(); jobIt != jobTable.end(); ++jobIt)
+	if (jobIt->first == ignoreJob)
+	{
+		if (next(jobIt) == jobTable.end())//If the only availible item is also the one that cannot be used, break out of the search.
+		{
+			printf(" Only a job that can't be used is availible, breaking job find!\n");
+			return NULL;
+		}
+		printf(" Skipping job %i, moving start to job %i\n", jobIt->first, next(jobIt)->first);
+		jobIt++;
+
+		highPriJobPriority = jobIt->second.priority;
+		highPriJobPos = jobIt->first;
+	}
+
+	printf(" JobIt is pointing at job %i\n", jobIt->first);
+
+	for (jobIt; jobIt != jobTable.end(); ++jobIt)
     {
         if (jobIt->second.priority < highPriJobPriority && jobIt->second.inCore == true && jobIt->second.isDoingIO == false && jobIt->first != ignoreJob) //Is the priority on the node it's looking at and is it in the core?
         {
             highPriJobPos = jobIt->first;
             highPriJobPriority = jobIt->second.priority;
         }
+		//printf("Chosen job is %i and isDoingIO == %d \n", jobIt->first, jobIt->second.isDoingIO);
     }
 
     //Here to make sure the default isn't breaking the rules. If the only choice is one that's busy or not inCore, it's useless
@@ -513,12 +534,13 @@ unsigned int findJob(int ignoreJob)
 bool scheduler(int &a, int p[], bool svcBlock)
 {    
     int pos;
-    if (svcBlock)
+	if (svcBlock && jobTable.size() != 1)
     {
+		printf(" Ignoring Job: %i\n", jobInCPU);
         pos = findJob(jobInCPU);
     }
-    else
-        pos = findJob(-2);
+	else
+        pos = findJob(-1);
 
     if (pos == NULL)
     {
@@ -541,6 +563,8 @@ bool scheduler(int &a, int p[], bool svcBlock)
     a = 2;
     jobUsingCPU = true;
     jobInCPU = pos;
+
+
 
     return true;
 }
