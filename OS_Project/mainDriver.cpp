@@ -485,10 +485,11 @@ unsigned int findJob(int ignoreJob)
     std::map<int, PCB>::iterator jobIt = jobTable.begin();
     if (jobTable.size() == 0) //Returns null if the job table is empty
         return NULL;
-
     unsigned int highPriJobPriority = jobIt->second.priority, highPriJobPos = jobIt->first; //Set the default choice values to first item
 	
+	bool someUnblocked = false; //To take care of an event where a job remains blocked if the unblocked job is run to completion
 
+	//Print out jobs
 	/*for (jobIt; jobIt != jobTable.end(); ++jobIt)
 	{
 		printf("JOBS: %i\n", jobIt->first);
@@ -511,27 +512,31 @@ unsigned int findJob(int ignoreJob)
 		highPriJobPos = jobIt->first;
 	}
 
-	while (jobIt->second.inCore == false && next(jobIt) != jobTable.end())
+	while ( (jobIt->second.inCore == false || jobIt->second.isBlocked == true) && next(jobIt) != jobTable.end())
 	{
 		jobIt++;
 		highPriJobPriority = jobIt->second.priority;
 		highPriJobPos = jobIt->first;
 	}
 
-	//printf(" JobIt is pointing at job %i\n", jobIt->first);
 
 	for (jobIt; jobIt != jobTable.end(); ++jobIt)
     {
+		if (jobIt->second.isBlocked == false && jobIt->second.inCore == true)
+			someUnblocked = true;
         if (jobIt->second.priority < highPriJobPriority && jobIt->second.inCore == true && jobIt->second.isDoingIO == false &&
 			jobIt->second.isBlocked == false && jobIt->first != ignoreJob) //Is the priority on the node it's looking at and is it in the core?
         {
             highPriJobPos = jobIt->first;
             highPriJobPriority = jobIt->second.priority;
         }
-		//printf("Potential job is %i, inCore = %d, isDoingIO == %d, isBlocked == %d \n", jobIt->first, jobIt->second.inCore, jobIt->second.isDoingIO, jobIt->second.isBlocked);
+		printf("Potential job is %i, inCore = %d, isDoingIO == %d, isBlocked == %d \n", jobIt->first, jobIt->second.inCore, jobIt->second.isDoingIO, jobIt->second.isBlocked);
     }
 
-    //Here to make sure the default isn't breaking the rules. If the only choice is one that's busy or not inCore, it's useless
+	if (someUnblocked == false)
+		return NULL;
+
+    //Here to make sure the default isn't breaking the rules. If the only choice is one that's busy, blocked or not inCore, it's useless
 	if ((jobTable[highPriJobPos].isDoingIO && jobTable[highPriJobPos].isBlocked) || !jobTable[highPriJobPos].inCore)
     {
         printf(" All jobs are doing IO or are not in Core!\n");
@@ -554,9 +559,7 @@ bool scheduler(int &a, int p[], bool svcBlock)
 	//Checks for the amount of jobs. If there's only 1 job in memory, a block request will be ignored
 	std::map<int, PCB>::iterator jobIt;
 	int jobsInMemory = 0;
-	int numBlockedJobs = 0;
 	int numUnblockedJobs = 0;
-	int preChoiceJob = jobInCPU;
 
 	if (jobUsingCPU && !svcBlock){ //For when jobs request interrupts but do not also want to be blocked.
 		jobTable[jobInCPU].cpuTimeUsed += p[5] - time;
@@ -568,20 +571,8 @@ bool scheduler(int &a, int p[], bool svcBlock)
 		if (jobIt->second.inCore)
 		{
 			jobsInMemory++;
-			if (jobIt->second.isBlocked)
-				numBlockedJobs++;
-			else
+			if (!(jobIt->second.isBlocked))
 				numUnblockedJobs++;
-		}
-	}
-
-	//If all jobs become blocked, clears blocked status on the first
-	if (numBlockedJobs == jobsInMemory && jobInCPU != -1 && jobsInMemory != 1)
-	{
-		numUnblockedJobs++;
-		numBlockedJobs--;
-		for (jobIt = jobTable.begin(); jobIt != jobTable.begin(); ++jobIt){
-			jobIt->second.isBlocked = false;
 		}
 	}
 
@@ -601,16 +592,6 @@ bool scheduler(int &a, int p[], bool svcBlock)
         jobInCPU = -1;
         return false;
     }
-
-	if (preChoiceJob == pos && jobsInMemory == 1)
-	{
-		svcBlock = false;
-	}
-/*	if (jobUsingCPU && !svcBlock && preChoiceJob == pos){ //For when jobs request interrupts but do not also want to be blocked.
-        jobTable[pos].cpuTimeUsed += p[5] - time;
-        printf(" Job %i not blocked, added inbetween time: %i\n", pos, p[5] - time);
-    }
-	*/
 
     printf(" Placing Job %i into the CPU\n", pos);
 
