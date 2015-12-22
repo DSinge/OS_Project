@@ -530,7 +530,7 @@ unsigned int findJob(int ignoreJob)
             highPriJobPos = jobIt->first;
             highPriJobPriority = jobIt->second.priority;
         }
-		printf("Potential job is %i, inCore = %d, isDoingIO == %d, isBlocked == %d \n", jobIt->first, jobIt->second.inCore, jobIt->second.isDoingIO, jobIt->second.isBlocked);
+		//printf("Potential job is %i, inCore = %d, isDoingIO == %d, isBlocked == %d \n", jobIt->first, jobIt->second.inCore, jobIt->second.isDoingIO, jobIt->second.isBlocked);
     }
 
 	if (someUnblocked == false)
