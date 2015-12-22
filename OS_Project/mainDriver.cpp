@@ -480,12 +480,13 @@ unsigned int findJob(int ignoreJob)
     unsigned int highPriJobPriority = jobIt->second.priority, highPriJobPos = jobIt->first; //Set the default choice values to first item
 	
 
-	for (jobIt; jobIt != jobTable.end(); ++jobIt)
+	/*for (jobIt; jobIt != jobTable.end(); ++jobIt)
 	{
 		printf("JOBS: %i\n", jobIt->first);
 		//printf("Chosen job is %i and isDoingIO == %d \n", jobIt->first, jobIt->second.isDoingIO);
 	}
 	 jobIt = jobTable.begin();
+	 */
 
 	if (jobIt->first == ignoreJob)
 	{
@@ -501,7 +502,7 @@ unsigned int findJob(int ignoreJob)
 		highPriJobPos = jobIt->first;
 	}
 
-	printf(" JobIt is pointing at job %i\n", jobIt->first);
+	//printf(" JobIt is pointing at job %i\n", jobIt->first);
 
 	for (jobIt; jobIt != jobTable.end(); ++jobIt)
     {
@@ -532,9 +533,21 @@ unsigned int findJob(int ignoreJob)
 *  
 */
 bool scheduler(int &a, int p[], bool svcBlock)
-{    
+{   
+	//Checks for the amount of jobs. If there's only 1 job in memory, a block request will be ignored
+	std::map<int, PCB>::iterator jobIt = jobTable.begin();
+	int jobsInMemory = 0;
+	int preChoiceJob = jobInCPU;
+	//printf(" The job in CPU before scheduling is % i\n", jobInCPU);
+
+	for (jobIt; jobIt != jobTable.end(); ++jobIt)
+	{
+		if (jobIt->second.inCore)
+			jobsInMemory++;
+	}
+
     int pos;
-	if (svcBlock && jobTable.size() != 1)
+	if (svcBlock && jobsInMemory != 1)
     {
 		printf(" Ignoring Job: %i\n", jobInCPU);
         pos = findJob(jobInCPU);
@@ -547,10 +560,16 @@ bool scheduler(int &a, int p[], bool svcBlock)
         jobInCPU = -1;
         return false;
     }
-    if (jobUsingCPU && !svcBlock){ //For when jobs request interrupts but do not also want to be blocked.
+
+	if (preChoiceJob == pos && jobsInMemory == 1)
+	{
+		svcBlock = false;
+	}
+	if (jobUsingCPU && !svcBlock && preChoiceJob == pos){ //For when jobs request interrupts but do not also want to be blocked.
         jobTable[pos].cpuTimeUsed += p[5] - time;
-        printf(" Job not blocked, added inbetween time: %i\n", p[5] - time);
+        printf(" Job %i not blocked, added inbetween time: %i\n", pos, p[5] - time);
     }
+
 
     printf(" Placing Job %i into the CPU\n", pos);
 
