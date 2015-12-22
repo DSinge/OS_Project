@@ -25,6 +25,7 @@ struct PCB {
     
     bool onIOQueue;
     bool isDoingIO;
+	bool isBlocked;
 
 };
 // Stores all jobs
@@ -83,6 +84,7 @@ void sendIO(int &a, int p[]);
 void startup(){
     
     //ontrace();
+
     // First node - All of memory is free
     freeSpaceTable.push_back(FreeSpace(0, 100));
     time = 0;
@@ -124,6 +126,7 @@ void Crint(int &a, int p[]){
     pcb.inCore = false; // Will be set in Drmint
     pcb.onIOQueue = false;
     pcb.isDoingIO = false;
+	pcb.isBlocked = false;
     pcb.memoryPos = NULL;
 
     jobTable.insert(pair<int, PCB>(p[1], pcb));
@@ -175,7 +178,9 @@ void Dskint(int &a, int p[]){
 	{
 		jobTable[jobInIO].isDoingIO = false;
 		jobTable[jobInIO].onIOQueue = false;
+		jobTable[jobInIO].isBlocked = false;
 	}
+
 
     jobInIO = -1;
 
@@ -287,6 +292,7 @@ void Svc(int &a, int p[]){
         case 7:    // Job wants to be blocked
         {
             printf(" Job %i wants to be blocked\n", jobInCPU);
+			jobTable[jobInCPU].isBlocked = true;
             if (scheduler(a, p, true) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
             {
 				printf(" No jobs could be run, CPU will stall.\n");
@@ -445,6 +451,7 @@ void sendIO(int &a, int p[])
 
     if (jobInIO == -1) //IO free? Now it's not and the one using it is current job
     {
+		printf(" Job %i sent into IO\n", jobInCPU);
         siodisk(IOQueue.front()->jobNumber);
         jobInIO = jobInCPU;
 		jobTable[jobInCPU].isDoingIO = true;
@@ -454,9 +461,9 @@ void sendIO(int &a, int p[])
     p[2] = jobTable[jobInCPU].memoryPos;
     p[3] = jobTable[jobInCPU].jobSize;
     p[4] = jobTable[jobInCPU].maxCpuTime - jobTable[jobInCPU].cpuTimeUsed;
-    printf(" p[4] (Time Quantum)= %i\n", p[4]);
+    printf("(Time Quantum)= %i\n", p[4]);
 
-    jobTable[IOQueue.front()->jobNumber].isDoingIO = true;
+    jobTable[IOQueue.front()->jobNumber].onIOQueue = true;
 
     a = 2;
 }
@@ -502,20 +509,28 @@ unsigned int findJob(int ignoreJob)
 		highPriJobPos = jobIt->first;
 	}
 
+	while (jobIt->second.inCore == false && next(jobIt) != jobTable.end())
+	{
+		jobIt++;
+		highPriJobPriority = jobIt->second.priority;
+		highPriJobPos = jobIt->first;
+	}
+
 	//printf(" JobIt is pointing at job %i\n", jobIt->first);
 
 	for (jobIt; jobIt != jobTable.end(); ++jobIt)
     {
-        if (jobIt->second.priority < highPriJobPriority && jobIt->second.inCore == true && jobIt->second.isDoingIO == false && jobIt->first != ignoreJob) //Is the priority on the node it's looking at and is it in the core?
+        if (jobIt->second.priority < highPriJobPriority && jobIt->second.inCore == true && jobIt->second.isDoingIO == false &&
+			jobIt->second.isBlocked == false && jobIt->first != ignoreJob) //Is the priority on the node it's looking at and is it in the core?
         {
             highPriJobPos = jobIt->first;
             highPriJobPriority = jobIt->second.priority;
         }
-		//printf("Chosen job is %i and isDoingIO == %d \n", jobIt->first, jobIt->second.isDoingIO);
+		printf("Potential job is %i, inCore = %d, isDoingIO == %d, isBlocked == %d \n", jobIt->first, jobIt->second.inCore, jobIt->second.isDoingIO, jobIt->second.isBlocked);
     }
 
     //Here to make sure the default isn't breaking the rules. If the only choice is one that's busy or not inCore, it's useless
-    if (jobTable[highPriJobPos].isDoingIO || !jobTable[highPriJobPos].inCore)
+	if ((jobTable[highPriJobPos].isDoingIO && jobTable[highPriJobPos].isBlocked) || !jobTable[highPriJobPos].inCore)
     {
         printf(" All jobs are doing IO or are not in Core!\n");
         return NULL;
@@ -533,21 +548,40 @@ unsigned int findJob(int ignoreJob)
 *  
 */
 bool scheduler(int &a, int p[], bool svcBlock)
-{   
+{
 	//Checks for the amount of jobs. If there's only 1 job in memory, a block request will be ignored
-	std::map<int, PCB>::iterator jobIt = jobTable.begin();
+	std::map<int, PCB>::iterator jobIt;
 	int jobsInMemory = 0;
+	int numBlockedJobs = 0;
+	int numUnblockedJobs = 0;
 	int preChoiceJob = jobInCPU;
-	//printf(" The job in CPU before scheduling is % i\n", jobInCPU);
 
-	for (jobIt; jobIt != jobTable.end(); ++jobIt)
-	{
-		if (jobIt->second.inCore)
-			jobsInMemory++;
+	if (jobUsingCPU && !svcBlock){ //For when jobs request interrupts but do not also want to be blocked.
+		jobTable[jobInCPU].cpuTimeUsed += p[5] - time;
+		printf(" Job %i not blocked, added inbetween time: %i\n", jobInCPU, p[5] - time);
 	}
 
-    int pos;
-	if (svcBlock && jobsInMemory != 1)
+	for (jobIt = jobTable.begin(); jobIt != jobTable.end(); ++jobIt)
+	{
+		if (jobIt->second.inCore)
+		{
+			jobsInMemory++;
+			if (jobIt->second.isBlocked)
+				numBlockedJobs++;
+			else
+				numUnblockedJobs++;
+		}
+	}
+
+	//If all jobs become blocked, clears blocked status
+	if (numBlockedJobs + 1 == jobsInMemory && jobInCPU != -1)
+	{
+		jobTable.begin()->second.isBlocked = false;
+	}
+
+	printf("num unblocked %i, num mem %i\n", numBlockedJobs, jobsInMemory);
+	int pos;
+	if (svcBlock && jobsInMemory != 1 && numUnblockedJobs != 1)
     {
 		printf(" Ignoring Job: %i\n", jobInCPU);
         pos = findJob(jobInCPU);
@@ -565,11 +599,11 @@ bool scheduler(int &a, int p[], bool svcBlock)
 	{
 		svcBlock = false;
 	}
-	if (jobUsingCPU && !svcBlock && preChoiceJob == pos){ //For when jobs request interrupts but do not also want to be blocked.
+/*	if (jobUsingCPU && !svcBlock && preChoiceJob == pos){ //For when jobs request interrupts but do not also want to be blocked.
         jobTable[pos].cpuTimeUsed += p[5] - time;
         printf(" Job %i not blocked, added inbetween time: %i\n", pos, p[5] - time);
     }
-
+	*/
 
     printf(" Placing Job %i into the CPU\n", pos);
 
