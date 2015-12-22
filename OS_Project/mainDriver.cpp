@@ -170,6 +170,7 @@ void Crint(int &a, int p[]){
  * Disk interrupt.
  * At call: p[5] = current time
  */
+
 void Dskint(int &a, int p[]){
     printf("Dskint called, job %i has finished I/O operations.\n", jobInIO);
 
@@ -184,7 +185,7 @@ void Dskint(int &a, int p[]){
 
     jobInIO = -1;
 
-    if(!IOQueue.empty()){
+    if(!IOQueue.empty() && IOQueue.front()->jobNumber > 0){
         printf(" IOQueue not empty, adding waiting job %i to IO\n", IOQueue.front()->jobNumber);
         siodisk(IOQueue.front()->jobNumber);
         jobInIO = IOQueue.front()->jobNumber;
