@@ -49,6 +49,8 @@ static list<FreeSpace> freeSpaceTable;
 // Using pointers to easily test if the job is in memory
 static queue<PCB*> IOQueue;
 
+static queue<PCB*> drumQueue;
+
 //Stores the current time, taken from interrupts
 static int time;
 
@@ -56,6 +58,7 @@ bool jobUsingCPU;
 int usingDrum;
 int jobInCPU;
 int jobInIO;
+int jobInDrum;
 
 int findMemLoc(int jobSize);
 void allocMem(int startAddress, int jobSize);
@@ -79,14 +82,14 @@ void sendIO(int &a, int p[]);
 
 void startup(){
     
-    //ontrace();
+    ontrace();
     // First node - All of memory is free
     freeSpaceTable.push_back(FreeSpace(0, 100));
     time = 0;
     jobUsingCPU = false;
-	jobInIO = -1;
-    usingDrum = 0;
     jobInCPU = -1;
+    jobInIO = -1;
+    jobInDrum = 0;
 }
 
 
@@ -123,21 +126,23 @@ void Crint(int &a, int p[]){
     pcb.isDoingIO = false;
     pcb.memoryPos = NULL;
 
+    jobTable.insert(pair<int, PCB>(p[1], pcb));
+    
     int memLoc = findMemLoc(p[3]);
 
     if(memLoc >= 0){
-        if(usingDrum == 0){
+        if(jobInDrum == 0){
             allocMem(memLoc, p[3]);
-            pcb.memoryPos = memLoc;
+            jobTable[p[1]].memoryPos = memLoc;
         
             printf("Drum is free for %i\n", p[1]);
-            usingDrum = p[1];
+            jobInDrum = p[1];
             siodrum(p[1], p[3], memLoc, 0);
-        }/*
+        }
         else{
             printf("DRUM IS BUSY");
-            exit(1);
-            }*/
+            drumQueue.push(&jobTable[p[1]]);
+        }
     }
     else{
         // Swap a job out
@@ -145,7 +150,7 @@ void Crint(int &a, int p[]){
         //exit(1); // Temporary
     }
 
-    jobTable.insert(pair<int, PCB>(p[1], pcb));
+
 
     if (jobUsingCPU){ //For when jobs request Crint but do not also want to be blocked. Happened in Job 4 first
         scheduler(a, p, false);
@@ -166,23 +171,23 @@ void Dskint(int &a, int p[]){
     printf("Dskint called, job %i has finished I/O operations.\n", jobInIO);
 
     IOQueue.pop();
-	jobTable[jobInIO].isDoingIO = false;
-	jobTable[jobInIO].onIOQueue = false;
+    jobTable[jobInIO].isDoingIO = false;
+    jobTable[jobInIO].onIOQueue = false;
 
-	jobInIO = -1;
+    jobInIO = -1;
 
     if(!IOQueue.empty()){
-		printf(" IOQueue not empty, adding waiting job %i to IO\n", IOQueue.front()->jobNumber);
-		siodisk(IOQueue.front()->jobNumber);
-		jobInIO = IOQueue.front()->jobNumber;
-		jobTable[jobInIO].isDoingIO = true;
+        printf(" IOQueue not empty, adding waiting job %i to IO\n", IOQueue.front()->jobNumber);
+        siodisk(IOQueue.front()->jobNumber);
+        jobInIO = IOQueue.front()->jobNumber;
+        jobTable[jobInIO].isDoingIO = true;
     }
 
-	if (scheduler(a, p, false) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
-	{
-		jobUsingCPU = false;
-		a = 1;
-	}
+    if (scheduler(a, p, false) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
+    {
+        jobUsingCPU = false;
+        a = 1;
+    }
 
     time = p[5];
     printf("Time = %i\n\n", time);
@@ -198,8 +203,32 @@ void Dskint(int &a, int p[]){
  */
 void Drmint(int &a, int p[]){
     cout << "Drmint Called\n";
-    jobTable[usingDrum].inCore = true;
-    usingDrum = 0;
+    jobTable[jobInDrum].inCore = true;
+    if(!drumQueue.empty()){
+        if(jobInDrum == drumQueue.front()->jobNumber){
+            drumQueue.pop();
+        }
+    }
+    jobInDrum = 0;
+
+    if(!drumQueue.empty()){
+        int memLoc = findMemLoc(drumQueue.front()->jobSize);
+
+        if(memLoc >= 0){
+            allocMem(memLoc, drumQueue.front()->jobSize);
+            jobTable[drumQueue.front()->jobNumber].memoryPos = memLoc;
+            
+            printf("Drum is free for %i\n", p[1]);
+        }
+        else{
+            // Swap a job out
+            printf("NO MEMORY LEFT\n");
+            //exit(1); // Temporary
+        }
+
+        jobInDrum = drumQueue.front()->jobNumber;
+        siodrum(drumQueue.front()->jobNumber, drumQueue.front()->jobSize, memLoc, 0);
+    }
 
     scheduler(a, p, false);
 
@@ -220,8 +249,8 @@ void Drmint(int &a, int p[]){
  */
 void Svc(int &a, int p[]){
     printf("Svc called\n");
-	jobTable[jobInCPU].cpuTimeUsed += p[5] - time;
-	printf(" Job %i CPU time used: %d\n", jobInCPU, jobTable[jobInCPU].cpuTimeUsed);
+    jobTable[jobInCPU].cpuTimeUsed += p[5] - time;
+    printf(" Job %i CPU time used: %d\n", jobInCPU, jobTable[jobInCPU].cpuTimeUsed);
 
     switch(a){
         case 5:    // Job has terminated
@@ -404,13 +433,13 @@ void sendIO(int &a, int p[])
     printf(" sendIO called\n");
     IOQueue.push(&jobTable[jobInCPU]);
     jobTable[jobInCPU].onIOQueue = true;
-	jobTable[jobInCPU].isDoingIO = true;
+    jobTable[jobInCPU].isDoingIO = true;
 
-	if (jobInIO == -1) //IO free? Now it's not and the one using it is current job
-	{
-		siodisk(IOQueue.front()->jobNumber);
-		jobInIO = jobInCPU;
-	}
+    if (jobInIO == -1) //IO free? Now it's not and the one using it is current job
+    {
+        siodisk(IOQueue.front()->jobNumber);
+        jobInIO = jobInCPU;
+    }
     //If the I/O is being requested, then the job must be in the CPU right now.
     p[1] = jobTable[jobInCPU].jobNumber;
     p[2] = jobTable[jobInCPU].memoryPos;
@@ -443,15 +472,15 @@ unsigned int findJob(int ignoreJob)
 
     if (jobIt->first == ignoreJob)
     {
-		if (jobIt == jobTable.end())//If the only availible item is also the one that cannot be used, break out of the search.
-		{
-			printf(" Only a job that can't be used is availible, breaking job find!\n");
-			return NULL;
-		}
+        if (jobIt == jobTable.end())//If the only availible item is also the one that cannot be used, break out of the search.
+        {
+            printf(" Only a job that can't be used is availible, breaking job find!\n");
+            return NULL;
+        }
         next(jobIt);
         highPriJobPriority = jobIt->second.priority;
         highPriJobPos = jobIt->first;
-		cout << "Skipping job " << jobIt->first << endl;
+        cout << "Skipping job " << jobIt->first << endl;
     }
 
     for (jobIt = jobTable.begin(); jobIt != jobTable.end(); ++jobIt)
@@ -484,18 +513,18 @@ unsigned int findJob(int ignoreJob)
 bool scheduler(int &a, int p[], bool svcBlock)
 {    
     int pos;
-	if (svcBlock)
-	{
-		pos = findJob(jobInCPU);
-	}
+    if (svcBlock)
+    {
+        pos = findJob(jobInCPU);
+    }
     else
         pos = findJob(-2);
 
-	if (pos == NULL)
-	{
-		jobInCPU = -1;
-		return false;
-	}
+    if (pos == NULL)
+    {
+        jobInCPU = -1;
+        return false;
+    }
     if (jobUsingCPU && !svcBlock){ //For when jobs request interrupts but do not also want to be blocked.
         jobTable[pos].cpuTimeUsed += p[5] - time;
         printf(" Job not blocked, added inbetween time: %i\n", p[5] - time);
