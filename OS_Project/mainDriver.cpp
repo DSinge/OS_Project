@@ -292,7 +292,8 @@ void Svc(int &a, int p[]){
         case 7:    // Job wants to be blocked
         {
             printf(" Job %i wants to be blocked\n", jobInCPU);
-			jobTable[jobInCPU].isBlocked = true;
+			if (jobTable[jobInCPU].onIOQueue)
+				jobTable[jobInCPU].isBlocked = true;
             if (scheduler(a, p, true) == false) //Scheduler will run, but if it returns 0, that means there is nothing that can be scheduled, so it will stall the CPU
             {
 				printf(" No jobs could be run, CPU will stall.\n");
@@ -526,7 +527,7 @@ unsigned int findJob(int ignoreJob)
             highPriJobPos = jobIt->first;
             highPriJobPriority = jobIt->second.priority;
         }
-		printf("Potential job is %i, inCore = %d, isDoingIO == %d, isBlocked == %d \n", jobIt->first, jobIt->second.inCore, jobIt->second.isDoingIO, jobIt->second.isBlocked);
+		//printf("Potential job is %i, inCore = %d, isDoingIO == %d, isBlocked == %d \n", jobIt->first, jobIt->second.inCore, jobIt->second.isDoingIO, jobIt->second.isBlocked);
     }
 
     //Here to make sure the default isn't breaking the rules. If the only choice is one that's busy or not inCore, it's useless
@@ -573,13 +574,18 @@ bool scheduler(int &a, int p[], bool svcBlock)
 		}
 	}
 
-	//If all jobs become blocked, clears blocked status
-	if (numBlockedJobs + 1 == jobsInMemory && jobInCPU != -1)
+	//If all jobs become blocked, clears blocked status on the first
+	if (numBlockedJobs == jobsInMemory && jobInCPU != -1 && jobsInMemory != 1)
 	{
-		jobTable.begin()->second.isBlocked = false;
+		numUnblockedJobs++;
+		numBlockedJobs--;
+		for (jobIt = jobTable.begin(); jobIt != jobTable.begin(); ++jobIt){
+			jobIt->second.isBlocked = false;
+		}
 	}
 
-	printf("num unblocked %i, num mem %i\n", numBlockedJobs, jobsInMemory);
+	//printf(" Number of blocked jobs: %i, Number of unblocked jobs: %i, Number of Jobs in Memory: %i\n", numBlockedJobs, numUnblockedJobs, jobsInMemory);
+	
 	int pos;
 	if (svcBlock && jobsInMemory != 1 && numUnblockedJobs != 1)
     {
