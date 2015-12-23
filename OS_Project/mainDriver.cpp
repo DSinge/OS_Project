@@ -441,49 +441,18 @@ void deallocMem(int startAddress, int jobSize){
     
 }
 
+/* Function: insertInDrumList
+ * --------------------------
+ * Inserts a job into a list holding jobs that need
+ * to be swapped in
+ */
 void insertInDrumList(int jobToInsert){
     if(drumList.empty()){
         drumList.push_front(&jobTable[jobToInsert]);
         return;
     }
-    
-    list<PCB*>::iterator it;
-    for(it = drumList.begin();
-        it != drumList.end();
-        it++)
-    {
-        if(jobTable[jobToInsert].jobSize < (*it)->jobSize){
-            //drumList.insert(it, &jobTable[jobToInsert]);
-            //return;
-        }
-    }
-    //drumList.insert(it, &jobTable[jobToInsert]);
-
-    return;
-    
 }
-/*
-void tryToSwapIn(){
-    if(!drumList.empty()){
-        int memLoc = findMemLoc(drumList.front()->jobSize);
 
-        if(memLoc >= 0){
-            allocMem(memLoc, drumList.front()->jobSize);
-            jobTable[drumList.front()->jobNumber].memoryPos = memLoc;
-            
-            printf("Drum is free for %i\n", p[1]);
-            jobInDrum = drumList.front()->jobNumber;
-            siodrum(drumList.front()->jobNumber, drumList.front()->jobSize, memLoc, 0);
-        }
-        else{
-            // Swap a job out
-            printf("NO MEMORY LEFT\n");
-            //exit(1); // Temporary
-        }
-    }
-
-}
-*/
 /* Function: sendIO
 * ---------------
 * Sends the job into IO when it requests it
