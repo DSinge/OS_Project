@@ -50,7 +50,7 @@ static list<FreeSpace> freeSpaceTable;
 // Using pointers to easily test if the job is in memory
 static queue<PCB*> IOQueue;
 
-static queue<PCB*> drumQueue;
+static list<PCB*> drumList;
 
 //Stores the current time, taken from interrupts
 static int time;
@@ -64,6 +64,8 @@ int jobInDrum;
 int findMemLoc(int jobSize);
 void allocMem(int startAddress, int jobSize);
 void deallocMem(int startAddress, int jobSize);
+void insertInDrumList(int jobToInsert);
+void tryToSwapIn();
 
 //Finds the highest priority job stored in jobTable and returns the job (key) number. It will completely ignore job of specified number
 unsigned int findJob(int ignoreJob);
@@ -143,8 +145,8 @@ void Crint(int &a, int p[]){
             siodrum(p[1], p[3], memLoc, 0);
         }
         else{
-            printf("DRUM IS BUSY");
-            drumQueue.push(&jobTable[p[1]]);
+            printf("DRUM IS BUSY");      
+            insertInDrumList(p[1]);
         }
     }
     else{
@@ -213,23 +215,23 @@ void Dskint(int &a, int p[]){
 void Drmint(int &a, int p[]){
     cout << "Drmint Called\n";
     jobTable[jobInDrum].inCore = true;
-    if(!drumQueue.empty()){
-        if(jobInDrum == drumQueue.front()->jobNumber){
-            drumQueue.pop();
+    if(!drumList.empty()){
+        if(jobInDrum == drumList.front()->jobNumber){
+            drumList.pop_front();
         }
     }
     jobInDrum = 0;
 
-    if(!drumQueue.empty()){
-        int memLoc = findMemLoc(drumQueue.front()->jobSize);
+    if(!drumList.empty()){
+        int memLoc = findMemLoc(drumList.front()->jobSize);
 
         if(memLoc >= 0){
-            allocMem(memLoc, drumQueue.front()->jobSize);
-            jobTable[drumQueue.front()->jobNumber].memoryPos = memLoc;
+            allocMem(memLoc, drumList.front()->jobSize);
+            jobTable[drumList.front()->jobNumber].memoryPos = memLoc;
             
             printf("Drum is free for %i\n", p[1]);
-            jobInDrum = drumQueue.front()->jobNumber;
-            siodrum(drumQueue.front()->jobNumber, drumQueue.front()->jobSize, memLoc, 0);
+            jobInDrum = drumList.front()->jobNumber;
+            siodrum(drumList.front()->jobNumber, drumList.front()->jobSize, memLoc, 0);
         }
         else{
             // Swap a job out
@@ -439,6 +441,49 @@ void deallocMem(int startAddress, int jobSize){
     
 }
 
+void insertInDrumList(int jobToInsert){
+    if(drumList.empty()){
+        drumList.push_front(&jobTable[jobToInsert]);
+        return;
+    }
+    
+    list<PCB*>::iterator it;
+    for(it = drumList.begin();
+        it != drumList.end();
+        it++)
+    {
+        if(jobTable[jobToInsert].jobSize < (*it)->jobSize){
+            //drumList.insert(it, &jobTable[jobToInsert]);
+            //return;
+        }
+    }
+    //drumList.insert(it, &jobTable[jobToInsert]);
+
+    return;
+    
+}
+/*
+void tryToSwapIn(){
+    if(!drumList.empty()){
+        int memLoc = findMemLoc(drumList.front()->jobSize);
+
+        if(memLoc >= 0){
+            allocMem(memLoc, drumList.front()->jobSize);
+            jobTable[drumList.front()->jobNumber].memoryPos = memLoc;
+            
+            printf("Drum is free for %i\n", p[1]);
+            jobInDrum = drumList.front()->jobNumber;
+            siodrum(drumList.front()->jobNumber, drumList.front()->jobSize, memLoc, 0);
+        }
+        else{
+            // Swap a job out
+            printf("NO MEMORY LEFT\n");
+            //exit(1); // Temporary
+        }
+    }
+
+}
+*/
 /* Function: sendIO
 * ---------------
 * Sends the job into IO when it requests it
